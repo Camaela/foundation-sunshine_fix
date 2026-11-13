@@ -1,163 +1,3 @@
-name: Build and Release
-
-# Published releases are owned by sign-and-repackage.yml. Keeping that event
-# out of this workflow prevents a release created below from starting another
-# build-and-release cycle.
-on:
-  pull_request:
-    branches:
-      - master
-    types:
-      - opened
-      - synchronize
-      - reopened
-  push:
-    branches:
-      - master
-  workflow_dispatch:
-
-concurrency:
-  group: '${{ github.workflow }}-${{ github.ref }}'
-  cancel-in-progress: true
-
-# Opt all Node.js 20 actions onto the Node.js 24 runtime. GitHub will
-# eventually flip this default itself; setting it explicitly silences the
-# `actions/checkout@v4` deprecation warning emitted on every run and keeps
-# us forward-compatible with the September 2026 Node 20 removal.
-env:
-  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: 'true'
-
-jobs:
-  setup_release:
-    name: Setup Release
-    outputs:
-      publish_release: ${{ steps.setup_release_auto.outputs.publish_release || steps.setup_release_manual.outputs.publish_release }}
-      release_body: ${{ steps.setup_release_auto.outputs.release_body || steps.setup_release_manual.outputs.release_body }}
-      release_commit: ${{ steps.setup_release_auto.outputs.release_commit || steps.setup_release_manual.outputs.release_commit }}
-      release_generate_release_notes: ${{ steps.setup_release_auto.outputs.release_generate_release_notes || steps.setup_release_manual.outputs.release_generate_release_notes }}
-      release_tag: ${{ steps.setup_release_auto.outputs.release_tag || steps.setup_release_manual.outputs.release_tag }}
-      release_version: ${{ steps.setup_release_auto.outputs.release_version || steps.setup_release_manual.outputs.release_version }}
-    permissions:
-      contents: write  # read does not work to check squash and merge details
-    runs-on: ubuntu-latest
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-
-      - name: Setup Release (Auto)
-        id: setup_release_auto
-        if: github.event_name != 'workflow_dispatch'
-        uses: LizardByte/setup-release-action@v2025.426.225
-        with:
-          github_token: ${{ secrets.GITHUB_TOKEN }}
-
-      - name: Setup Release (Manual)
-        id: setup_release_manual
-        if: github.event_name == 'workflow_dispatch'
-        run: |
-          SUFFIX=$([ "${{ github.ref_name }}" = "master" ] && echo "" || echo "-dev")
-          echo "publish_release=false" >> $GITHUB_OUTPUT
-          echo "release_body=Manual build (${{ github.ref_name }})" >> $GITHUB_OUTPUT
-          echo "release_commit=${{ github.sha }}" >> $GITHUB_OUTPUT
-          echo "release_generate_release_notes=false" >> $GITHUB_OUTPUT
-          echo "release_tag=manual-$(date +%Y%m%d-%H%M%S)${SUFFIX}" >> $GITHUB_OUTPUT
-          echo "release_version=manual-$(date +%Y%m%d-%H%M%S)${SUFFIX}" >> $GITHUB_OUTPUT
-
-  build_win:
-    name: Windows
-    needs: setup_release
-    runs-on: windows-latest
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-        with:
-          ref: ${{ github.sha }}
-          submodules: recursive
-
-      - name: Setup Dependencies Windows
-        uses: msys2/setup-msys2@v2
-        with:
-          msystem: ucrt64
-          update: true
-          install: >-
-            wget
-            curl
-
-      - name: Update Windows dependencies
-        env:
-          opus_version: '1.6.1-1'
-        shell: msys2 {0}
-        run: |
-          # download pinned opus version
-          opus_tarball="mingw-w64-ucrt-x86_64-opus-${opus_version}-any.pkg.tar.zst"
-          wget https://repo.msys2.org/mingw/ucrt64/${opus_tarball}
-
-          # install dependencies
-          # NOTE: gcc/gcc-libs were previously pinned to 15.1.0-5 to work around
-          # a broken upstream gcc 15.x. Since msys2 has moved on to gcc 16.x and
-          # other packages (cmake, etc.) now require gcc-libs 16.x ABI, pinning
-          # an old gcc-libs causes cmake.exe to silently fail to load (exit 127).
-          # Let pacman install the full toolchain at the current upstream version.
-          dependencies=(
-            "git"
-            "mingw-w64-ucrt-x86_64-cmake"
-            "mingw-w64-ucrt-x86_64-ninja"
-            "mingw-w64-ucrt-x86_64-cppwinrt"
-            "mingw-w64-ucrt-x86_64-curl-winssl"
-            "mingw-w64-ucrt-x86_64-graphviz"
-            "mingw-w64-ucrt-x86_64-MinHook"
-            "mingw-w64-ucrt-x86_64-miniupnpc"
-            "mingw-w64-ucrt-x86_64-nlohmann-json"
-            # "mingw-w64-ucrt-x86_64-nodejs"  # Replaced by actions/setup-node (vite 8 requires MSVC Node.js)
-            # "mingw-w64-ucrt-x86_64-nsis"  # Replaced by Inno Setup
-            "mingw-w64-ucrt-x86_64-onevpl"
-            "mingw-w64-ucrt-x86_64-openssl"
-            "mingw-w64-ucrt-x86_64-toolchain"
-            "mingw-w64-ucrt-x86_64-autotools"
-          )
-
-          pacman -Syu --noconfirm "${dependencies[@]}"
-
-          # install pinned opus after Syu to prevent upgrade
-          pacman --noconfirm -U ${opus_tarball}
-
-      - name: Verify Build Tools
-        shell: msys2 {0}
-        run: |
-          echo "Verifying build tools are installed..."
-          which cmake || (echo "cmake not found" && exit 1)
-          which ninja || (echo "ninja not found" && exit 1)
-          which gcc || (echo "gcc not found" && exit 1)
-          
-          echo "All build tools verified successfully"
-          echo "  CMake: $(cmake --version | head -1)"
-          echo "  Ninja: $(ninja --version)"
-          echo "  GCC: $(gcc --version | head -1)"
-
-      - name: Setup Node.js
-        uses: actions/setup-node@v4
-        with:
-          node-version: 22
-          cache: npm
-          cache-dependency-path: package-lock.json
-
-      - name: Build Web UI
-        shell: pwsh
-        run: |
-          npm ci
-          npm run lint:webui
-          npm run test:webui
-          New-Item -ItemType Directory -Force -Path build | Out-Null
-          $env:SUNSHINE_SOURCE_ASSETS_DIR = "${{ github.workspace }}\src_assets"
-          $env:SUNSHINE_ASSETS_DIR = "${{ github.workspace }}\build"
-          npm run build
-
-      - name: Build Windows
-        shell: msys2 {0}
-        env:
-          BRANCH: ${{ github.head_ref || github.ref_name }}
-          BUILD_VERSION: ${{ needs.setup_release.outputs.release_tag }}.杂鱼
-          COMMIT: ${{ needs.setup_release.outputs.release_commit }}
           GITHUB_TOKEN: ${{ secrets.DRIVER_DOWNLOAD_TOKEN }}
           # Fork PRs cannot access org-scoped secrets, so private-repo driver
           # downloads (vmouse) may fail. Downgrade missing drivers from
@@ -195,16 +35,22 @@ jobs:
         if: steps.inno-cache.outputs.cache-hit != 'true'
         shell: pwsh
         run: |
-          # Download and install Inno Setup 6 (silent install)
-          $url = "https://jrsoftware.org/download.php/is.exe"
-          $installer = "$env:TEMP\innosetup.exe"
-          Invoke-WebRequest -Uri $url -OutFile $installer
-          Start-Process -FilePath $installer -ArgumentList '/VERYSILENT /SUPPRESSMSGBOXES /NORESTART /SP-' -Wait
+          # Use the GitHub-hosted Windows runner's Chocolatey package manager.
+          choco install innosetup --yes --no-progress
+          if ($LASTEXITCODE -ne 0) {
+            throw "Chocolatey failed to install Inno Setup (exit code $LASTEXITCODE)"
+          }
 
-      - name: Add Inno Setup to PATH
+      - name: Verify Inno Setup and add to PATH
         shell: pwsh
         run: |
-          echo "C:\Program Files (x86)\Inno Setup 6" >> $env:GITHUB_PATH
+          $innoDir = "${env:ProgramFiles(x86)}\Inno Setup 6"
+          $compiler = Join-Path $innoDir "ISCC.exe"
+          if (-not (Test-Path -LiteralPath $compiler -PathType Leaf)) {
+            throw "Inno Setup compiler missing: $compiler"
+          }
+          $innoDir | Out-File -FilePath $env:GITHUB_PATH -Append -Encoding utf8
+          Write-Host "Inno Setup compiler verified: $compiler"
 
       - name: Package Windows
         shell: msys2 {0}
