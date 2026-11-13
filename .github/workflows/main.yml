@@ -1,133 +1,96 @@
-          GITHUB_TOKEN: ${{ secrets.DRIVER_DOWNLOAD_TOKEN }}
-          # Fork PRs cannot access org-scoped secrets, so private-repo driver
-          # downloads (vmouse) may fail. Downgrade missing drivers from
-          # FATAL_ERROR to WARNING so the build/configure still succeeds; the
-          # affected drivers are simply excluded from the installer.
-          DRIVER_DEPS_REQUIRED: ${{ (github.event_name == 'pull_request' && github.event.pull_request.head.repo.fork) && 'OFF' || 'ON' }}
-        run: |
-          mkdir -p build
-          cmake \
-            -B build \
-            -G Ninja \
-            -S . \
-            -DBUILD_DOCS=OFF \
-            -DBUILD_TRAY_TESTS=ON \
-            -DBUILD_WEB_UI=OFF \
-            -DSUNSHINE_ASSETS_DIR=assets \
-            -DDRIVER_DEPS_REQUIRED=${DRIVER_DEPS_REQUIRED} \
-            -DSUNSHINE_PUBLISHER_NAME='${{ github.repository_owner }}' \
-            -DSUNSHINE_PUBLISHER_WEBSITE='https://github.com/AlkaidLab/foundation-sunshine' \
-            -DSUNSHINE_PUBLISHER_ISSUE_URL='https://github.com/AlkaidLab/foundation-sunshine/issues'
-          ninja -C build
+name: Build and Release
 
-      - name: Run native tests
-        shell: msys2 {0}
-        run: ctest --test-dir build --output-on-failure
+# Published releases are owned by sign-and-repackage.yml. Keeping that event
+# out of this workflow prevents a release created below from starting another
+# build-and-release cycle.
+on:
+  pull_request:
+    branches:
+      - master
+    types:
+      - opened
+      - synchronize
+      - reopened
+  push:
+    branches:
+      - master
+  workflow_dispatch:
 
-      - name: Cache Inno Setup
-        id: inno-cache
-        uses: actions/cache@v4
+concurrency:
+  group: '${{ github.workflow }}-${{ github.ref }}'
+  cancel-in-progress: true
+
+# Opt all Node.js 20 actions onto the Node.js 24 runtime. GitHub will
+# eventually flip this default itself; setting it explicitly silences the
+# `actions/checkout@v4` deprecation warning emitted on every run and keeps
+# us forward-compatible with the September 2026 Node 20 removal.
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: 'true'
+
+jobs:
+  setup_release:
+    name: Setup Release
+    outputs:
+      publish_release: ${{ steps.setup_release_auto.outputs.publish_release || steps.setup_release_manual.outputs.publish_release }}
+      release_body: ${{ steps.setup_release_auto.outputs.release_body || steps.setup_release_manual.outputs.release_body }}
+      release_commit: ${{ steps.setup_release_auto.outputs.release_commit || steps.setup_release_manual.outputs.release_commit }}
+      release_generate_release_notes: ${{ steps.setup_release_auto.outputs.release_generate_release_notes || steps.setup_release_manual.outputs.release_generate_release_notes }}
+      release_tag: ${{ steps.setup_release_auto.outputs.release_tag || steps.setup_release_manual.outputs.release_tag }}
+      release_version: ${{ steps.setup_release_auto.outputs.release_version || steps.setup_release_manual.outputs.release_version }}
+    permissions:
+      contents: write  # read does not work to check squash and merge details
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Release (Auto)
+        id: setup_release_auto
+        if: github.event_name != 'workflow_dispatch'
+        uses: LizardByte/setup-release-action@v2025.426.225
         with:
-          path: C:\Program Files (x86)\Inno Setup 6
-          key: inno-setup-6
+          github_token: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Install Inno Setup
-        if: steps.inno-cache.outputs.cache-hit != 'true'
-        shell: pwsh
+      - name: Setup Release (Manual)
+        id: setup_release_manual
+        if: github.event_name == 'workflow_dispatch'
         run: |
-          # Use the GitHub-hosted Windows runner's Chocolatey package manager.
-          choco install innosetup --yes --no-progress
-          if ($LASTEXITCODE -ne 0) {
-            throw "Chocolatey failed to install Inno Setup (exit code $LASTEXITCODE)"
-          }
+          SUFFIX=$([ "${{ github.ref_name }}" = "master" ] && echo "" || echo "-dev")
+          echo "publish_release=false" >> $GITHUB_OUTPUT
+          echo "release_body=Manual build (${{ github.ref_name }})" >> $GITHUB_OUTPUT
+          echo "release_commit=${{ github.sha }}" >> $GITHUB_OUTPUT
+          echo "release_generate_release_notes=false" >> $GITHUB_OUTPUT
+          echo "release_tag=manual-$(date +%Y%m%d-%H%M%S)${SUFFIX}" >> $GITHUB_OUTPUT
+          echo "release_version=manual-$(date +%Y%m%d-%H%M%S)${SUFFIX}" >> $GITHUB_OUTPUT
 
-      - name: Verify Inno Setup and add to PATH
-        shell: pwsh
-        run: |
-          $innoDir = "${env:ProgramFiles(x86)}\Inno Setup 6"
-          $compiler = Join-Path $innoDir "ISCC.exe"
-          if (-not (Test-Path -LiteralPath $compiler -PathType Leaf)) {
-            throw "Inno Setup compiler missing: $compiler"
-          }
-          $innoDir | Out-File -FilePath $env:GITHUB_PATH -Append -Encoding utf8
-          Write-Host "Inno Setup compiler verified: $compiler"
+  build_win:
+    name: Windows
+    needs: setup_release
+    runs-on: windows-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+          submodules: recursive
 
-      - name: Package Windows
-        shell: msys2 {0}
-        run: |
-          mkdir -p artifacts
-          cd build
+      - name: Setup Dependencies Windows
+        uses: msys2/setup-msys2@v2
+        with:
+          msystem: ucrt64
+          update: true
+          install: >-
+            wget
+            curl
 
-          # Package the Inno Setup installer and portable ZIP.
-          # Install into the staging directory first.
-          cmake --install . --prefix ./inno_staging
-          
-          # Run the Inno Setup compiler.
-          "/c/Program Files (x86)/Inno Setup 6/ISCC.exe" sunshine_installer.iss
-          
-          # Generate the portable ZIP.
-          cpack -G ZIP --config ./CPackConfig.cmake --verbose
-
-          # move
-          mv ./cpack_artifacts/Sunshine.exe ../artifacts/sunshine-windows-installer.exe
-          mv ./cpack_artifacts/Sunshine.zip ../artifacts/sunshine-windows-portable.zip
-
-      - name: Generate Checksums
-        shell: pwsh
-        run: |
-          # Generate SHA256 checksums.
-          .\scripts\generate-checksums.ps1 -Path .\artifacts -Output "SHA256SUMS.txt"
-
-      - name: Package Windows Debug Info
-        working-directory: build
-        run: |
-          # use .dbg file extension for binaries to avoid confusion with real packages
-          Get-ChildItem -File -Recurse | `
-            % { Rename-Item -Path $_.PSPath -NewName $_.Name.Replace(".exe",".dbg") }
-
-          # save the binaries with debug info
-          7z -r `
-            "-xr!CMakeFiles" `
-            "-xr!cpack_artifacts" `
-            a "../artifacts/sunshine-win32-debuginfo.7z" "*.dbg"
-
-      - name: Rename release assets
+      - name: Update Windows dependencies
+        env:
+          opus_version: '1.6.1-1'
         shell: msys2 {0}
         run: |
-          # Format tag to vYEAR.DATE where DATE is zero-padded to 4 digits
-          TAG="${{ needs.setup_release.outputs.release_tag }}"
-          NEWTAG="$TAG"
+          # download pinned opus version
+          opus_tarball="mingw-w64-ucrt-x86_64-opus-${opus_version}-any.pkg.tar.zst"
+          wget https://repo.msys2.org/mingw/ucrt64/${opus_tarball}
 
-          if [[ "$TAG" =~ ^v([0-9]{4})\.([0-9]+) ]]; then
-            YEAR="${BASH_REMATCH[1]}"
-            DATE_PART="${BASH_REMATCH[2]}"
-            DATE_PADDED=$(printf "%04d" "$DATE_PART")
-            NEWTAG="v${YEAR}.${DATE_PADDED}"
-          fi
-
-          # 重命名安装包和便携版
-          mv artifacts/sunshine-windows-installer.exe "artifacts/Sunshine.${NEWTAG}.WindowsInstaller.exe"
-          mv artifacts/sunshine-windows-portable.zip "artifacts/Sunshine.${NEWTAG}.WindowsPortable.zip"
-
-      - name: Upload Artifacts
-        uses: actions/upload-artifact@v4
-        with:
-          name: sunshine-windows-r${{ github.run_number }}
-          path: |
-            artifacts/Sunshine.*.WindowsInstaller.exe
-            artifacts/Sunshine.*.WindowsPortable.zip
-            artifacts/SHA256SUMS.txt
-            artifacts/checksums.json
-          if-no-files-found: error
-
-      - name: Create/Update GitHub Release
-        if: needs.setup_release.outputs.publish_release == 'true'
-        uses: LizardByte/create-release-action@v2025.426.1549
-        with:
-          allowUpdates: true
-          body: ${{ needs.setup_release.outputs.release_body }}
-          generateReleaseNotes: ${{ needs.setup_release.outputs.release_generate_release_notes }}
-          name: ${{ needs.setup_release.outputs.release_tag }}.杂鱼
-          prerelease: true
-          tag: ${{ needs.setup_release.outputs.release_tag }}.杂鱼
-          token: ${{ secrets.GH_BOT_TOKEN }}
+          # install dependencies
+          # NOTE: gcc/gcc-libs were previously pinned to 15.1.0-5 to work around
