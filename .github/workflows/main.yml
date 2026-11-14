@@ -14,6 +14,7 @@ on:
   push:
     branches:
       - master
+      - latest-gpup-fix
   workflow_dispatch:
 
 concurrency:
@@ -46,14 +47,14 @@ jobs:
 
       - name: Setup Release (Auto)
         id: setup_release_auto
-        if: github.event_name != 'workflow_dispatch'
+        if: github.event_name != 'workflow_dispatch' && github.ref_name != 'latest-gpup-fix'
         uses: LizardByte/setup-release-action@v2025.426.225
         with:
           github_token: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Setup Release (Manual)
         id: setup_release_manual
-        if: github.event_name == 'workflow_dispatch'
+        if: github.event_name == 'workflow_dispatch' || github.ref_name == 'latest-gpup-fix'
         run: |
           SUFFIX=$([ "${{ github.ref_name }}" = "master" ] && echo "" || echo "-dev")
           echo "publish_release=false" >> $GITHUB_OUTPUT
@@ -160,7 +161,7 @@ jobs:
         shell: msys2 {0}
         env:
           BRANCH: ${{ github.head_ref || github.ref_name }}
-          BUILD_VERSION: ${{ needs.setup_release.outputs.release_tag }}.æ‚é±¼
+          BUILD_VERSION: ${{ needs.setup_release.outputs.release_tag }}.Ã¦Ââ€šÃ©Â±Â¼
           COMMIT: ${{ needs.setup_release.outputs.release_commit }}
           GITHUB_TOKEN: ${{ secrets.DRIVER_DOWNLOAD_TOKEN }}
           # Fork PRs cannot access org-scoped secrets, so private-repo driver
@@ -269,7 +270,7 @@ jobs:
             NEWTAG="v${YEAR}.${DATE_PADDED}"
           fi
 
-          # é‡å‘½åå®‰è£…åŒ…å’Œä¾¿æºç‰ˆ
+          # Ã©â€¡ÂÃ¥â€˜Â½Ã¥ÂÂÃ¥Â®â€°Ã¨Â£â€¦Ã¥Å’â€¦Ã¥â€™Å’Ã¤Â¾Â¿Ã¦ÂÂºÃ§â€°Ë†
           mv artifacts/sunshine-windows-installer.exe "artifacts/Sunshine.${NEWTAG}.WindowsInstaller.exe"
           mv artifacts/sunshine-windows-portable.zip "artifacts/Sunshine.${NEWTAG}.WindowsPortable.zip"
 
@@ -291,7 +292,7 @@ jobs:
           allowUpdates: true
           body: ${{ needs.setup_release.outputs.release_body }}
           generateReleaseNotes: ${{ needs.setup_release.outputs.release_generate_release_notes }}
-          name: ${{ needs.setup_release.outputs.release_tag }}.æ‚é±¼
+          name: ${{ needs.setup_release.outputs.release_tag }}.Ã¦Ââ€šÃ©Â±Â¼
           prerelease: true
-          tag: ${{ needs.setup_release.outputs.release_tag }}.æ‚é±¼
+          tag: ${{ needs.setup_release.outputs.release_tag }}.Ã¦Ââ€šÃ©Â±Â¼
           token: ${{ secrets.GH_BOT_TOKEN }}
