@@ -171,18 +171,59 @@ jobs:
           DRIVER_DEPS_REQUIRED: ${{ (github.event_name == 'pull_request' && github.event.pull_request.head.repo.fork) && 'OFF' || 'ON' }}
         run: |
           mkdir -p build
-          cmake \
-            -B build \
-            -G Ninja \
-            -S . \
-            -DBUILD_DOCS=OFF \
-            -DBUILD_TRAY_TESTS=ON \
-            -DBUILD_WEB_UI=OFF \
-            -DSUNSHINE_ASSETS_DIR=assets \
-            -DDRIVER_DEPS_REQUIRED=${DRIVER_DEPS_REQUIRED} \
-            -DSUNSHINE_PUBLISHER_NAME='${{ github.repository_owner }}' \
-            -DSUNSHINE_PUBLISHER_WEBSITE='https://github.com/AlkaidLab/foundation-sunshine' \
-            -DSUNSHINE_PUBLISHER_ISSUE_URL='https://github.com/AlkaidLab/foundation-sunshine/issues'
+          # BOOST_LOCALE_RETRY_FIX
+          configure_sunshine() {
+            cmake \
+              -B build \
+              -G Ninja \
+              -S . \
+              -DBUILD_DOCS=OFF \
+              -DBUILD_TRAY_TESTS=ON \
+              -DBUILD_WEB_UI=OFF \
+              -DSUNSHINE_ASSETS_DIR=assets \
+              -DDRIVER_DEPS_REQUIRED=${DRIVER_DEPS_REQUIRED} \
+              -DSUNSHINE_PUBLISHER_NAME='${{ github.repository_owner }}' \
+              -DSUNSHINE_PUBLISHER_WEBSITE='https://github.com/AlkaidLab/foundation-sunshine' \
+              -DSUNSHINE_PUBLISHER_ISSUE_URL='https://github.com/AlkaidLab/foundation-sunshine/issues'
+          }
+          if ! configure_sunshine; then
+            echo "Checking Boost.Locale source grouping..."
+
+            boost_file="build/_deps/boost-src/libs/locale/CMakeLists.txt"
+
+            if [[ ! -f "$boost_file" ]]; then
+              echo "Boost.Locale file not found. Stopping."
+              exit 1
+            fi
+
+            old='source_group(TREE "${CMAKE_CURRENT_SOURCE_DIR}/include/boost/locale" PREFIX "headers" FILES ${sources_inc})'
+            new='source_group(TREE "${CMAKE_CURRENT_SOURCE_DIR}/include" PREFIX "headers" FILES ${sources_inc})'
+
+            if ! grep -Fq "$old" "$boost_file"; then
+              echo "Expected Boost.Locale rule not found."
+              exit 1
+            fi
+
+            BOOST_FILE="$boost_file" python - <<'PY'
+import os
+from pathlib import Path
+
+p = Path(os.environ["BOOST_FILE"])
+text = p.read_text(encoding="utf-8")
+
+old = 'source_group(TREE "${CMAKE_CURRENT_SOURCE_DIR}/include/boost/locale" PREFIX "headers" FILES ${sources_inc})'
+new = 'source_group(TREE "${CMAKE_CURRENT_SOURCE_DIR}/include" PREFIX "headers" FILES ${sources_inc})'
+
+if text.count(old) != 1:
+    raise SystemExit("Expected exactly one Boost.Locale rule")
+
+p.write_text(text.replace(old, new), encoding="utf-8")
+PY
+
+            echo "Boost.Locale rule patched. Retrying CMake..."
+            configure_sunshine
+          fi
+
           ninja -C build
 
       - name: Run native tests
