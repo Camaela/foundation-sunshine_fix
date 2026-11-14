@@ -65,6 +65,13 @@ namespace video {
     std::mutex hdr_pipeline_status_mutex;
     std::map<std::uint64_t, hdr_pipeline_status_t> hdr_pipeline_statuses;
     std::atomic<std::uint64_t> next_hdr_pipeline_status_id { 1 };
+    // GPU-P fix: keep the configured capture backend during
+    // encoder probing. Do not force DDX when using Zako Direct.
+    std::optional<std::string>
+    capture_override_for_encoder_probe() {
+      return std::nullopt;
+    }
+
 
     /**
      * @brief Check if we can allow probing for the encoders.
