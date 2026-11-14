@@ -252,11 +252,10 @@ set(CPACK_COMPONENT_GAMEPAD_DESCRIPTION "Scripts to install and uninstall Virtua
 set(CPACK_COMPONENT_GAMEPAD_GROUP "Scripts")
 
 # include specific packaging
-if(SUNSHINE_DS5_SIDECAR_PACKAGE_AVAILABLE)
-  include(${CMAKE_MODULE_PATH}/packaging/windows_innosetup.cmake)
-else()
-  message(STATUS "Inno Setup targets are disabled because the DualSense sidecar package manifest is missing")
-endif()
+# Custom GPU-P build:
+# Enable Inno Setup independently of the optional DS5 sidecar.
+# The installer template omits the DS5 manifest when unavailable.
+include(${CMAKE_MODULE_PATH}/packaging/windows_innosetup.cmake)
 # Legacy NSIS/WiX (kept for reference, no longer used)
 # include(${CMAKE_MODULE_PATH}/packaging/windows_nsis.cmake)
 # include(${CMAKE_MODULE_PATH}/packaging/windows_wix.cmake)
