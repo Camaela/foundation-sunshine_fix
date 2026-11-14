@@ -157,6 +157,34 @@ jobs:
           $env:SUNSHINE_ASSETS_DIR = "${{ github.workspace }}\build"
           npm run build
 
+      - name: Cache Inno Setup
+        id: inno-cache
+        uses: actions/cache@v4
+        with:
+          path: C:\Program Files (x86)\Inno Setup 6
+          key: inno-setup-6
+
+      - name: Install Inno Setup
+        if: steps.inno-cache.outputs.cache-hit != 'true'
+        shell: pwsh
+        run: |
+          # Use the GitHub-hosted Windows runner's Chocolatey package manager.
+          choco install innosetup --yes --no-progress
+          if ($LASTEXITCODE -ne 0) {
+            throw "Chocolatey failed to install Inno Setup (exit code $LASTEXITCODE)"
+          }
+
+      - name: Verify Inno Setup and add to PATH
+        shell: pwsh
+        run: |
+          $innoDir = "${env:ProgramFiles(x86)}\Inno Setup 6"
+          $compiler = Join-Path $innoDir "ISCC.exe"
+          if (-not (Test-Path -LiteralPath $compiler -PathType Leaf)) {
+            throw "Inno Setup compiler missing: $compiler"
+          }
+          $innoDir | Out-File -FilePath $env:GITHUB_PATH -Append -Encoding utf8
+          Write-Host "Inno Setup compiler verified: $compiler"
+
       - name: Build Windows
         shell: msys2 {0}
         env:
@@ -210,39 +238,17 @@ jobs:
             configure_sunshine
           fi
 
+          # Verify generated Inno Setup script
+          if [[ ! -f build/sunshine_installer.iss ]]; then
+            echo "ERROR: CMake did not generate sunshine_installer.iss"
+            echo "Check CMake output for disabled Inno Setup packaging."
+            exit 1
+          fi
           ninja -C build
 
       - name: Run native tests
         shell: msys2 {0}
         run: ctest --test-dir build --output-on-failure
-
-      - name: Cache Inno Setup
-        id: inno-cache
-        uses: actions/cache@v4
-        with:
-          path: C:\Program Files (x86)\Inno Setup 6
-          key: inno-setup-6
-
-      - name: Install Inno Setup
-        if: steps.inno-cache.outputs.cache-hit != 'true'
-        shell: pwsh
-        run: |
-          # Use the GitHub-hosted Windows runner's Chocolatey package manager.
-          choco install innosetup --yes --no-progress
-          if ($LASTEXITCODE -ne 0) {
-            throw "Chocolatey failed to install Inno Setup (exit code $LASTEXITCODE)"
-          }
-
-      - name: Verify Inno Setup and add to PATH
-        shell: pwsh
-        run: |
-          $innoDir = "${env:ProgramFiles(x86)}\Inno Setup 6"
-          $compiler = Join-Path $innoDir "ISCC.exe"
-          if (-not (Test-Path -LiteralPath $compiler -PathType Leaf)) {
-            throw "Inno Setup compiler missing: $compiler"
-          }
-          $innoDir | Out-File -FilePath $env:GITHUB_PATH -Append -Encoding utf8
-          Write-Host "Inno Setup compiler verified: $compiler"
 
       - name: Package Windows
         shell: msys2 {0}
