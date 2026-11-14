@@ -204,21 +204,7 @@ jobs:
               exit 1
             fi
 
-            BOOST_FILE="$boost_file" python - <<'PY'
-import os
-from pathlib import Path
-
-p = Path(os.environ["BOOST_FILE"])
-text = p.read_text(encoding="utf-8")
-
-old = 'source_group(TREE "${CMAKE_CURRENT_SOURCE_DIR}/include/boost/locale" PREFIX "headers" FILES ${sources_inc})'
-new = 'source_group(TREE "${CMAKE_CURRENT_SOURCE_DIR}/include" PREFIX "headers" FILES ${sources_inc})'
-
-if text.count(old) != 1:
-    raise SystemExit("Expected exactly one Boost.Locale rule")
-
-p.write_text(text.replace(old, new), encoding="utf-8")
-PY
+            sed -i 's|/include/boost/locale" PREFIX "headers"|/include" PREFIX "headers"|' "$boost_file"
 
             echo "Boost.Locale rule patched. Retrying CMake..."
             configure_sunshine
