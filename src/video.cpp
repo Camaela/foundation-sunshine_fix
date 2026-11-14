@@ -66,22 +66,6 @@ namespace video {
     std::map<std::uint64_t, hdr_pipeline_status_t> hdr_pipeline_statuses;
     std::atomic<std::uint64_t> next_hdr_pipeline_status_id { 1 };
 
-    std::optional<std::string>
-    capture_override_for_encoder_probe() {
-#ifdef _WIN32
-      // VDD shared-texture producer may not be ready (metadata mapping / KeyedMutex
-      // not yet published) at encoder-probe time. Probing the real VDD backend
-      // therefore tends to fail on cold start, even though runtime capture works
-      // fine once the producer comes up. Fall back to ddx for the probe only;
-      // this override is injected per-display via config_t::capture_backend_override
-      // so it does not mutate the global config::video.capture used at runtime.
-      if (config::video.capture == "vdd") {
-        return std::string { "ddx" };
-      }
-#endif
-      return std::nullopt;
-    }
-
     /**
      * @brief Check if we can allow probing for the encoders.
      * @return True if there should be no issues with the probing, false if we should prevent it.
@@ -4812,18 +4796,12 @@ namespace video {
     const std::optional<std::string> &probe_capture_override,
     const std::string &probe_display_name) {
     std::shared_ptr<platf::display_t> disp;
-    const auto configured_capture_backend = config::video.capture;
+
 
     BOOST_LOG(info) << "Trying encoder ["sv << encoder.name << ']';
     auto fg = util::fail_guard([&]() {
       BOOST_LOG(info) << "Encoder ["sv << encoder.name << "] failed"sv;
     });
-
-    if (probe_capture_override) {
-      BOOST_LOG(info) << "Temporarily using capture backend ["sv << *probe_capture_override
-                      << "] for encoder probe while configured capture backend is ["sv
-                      << configured_capture_backend << "]"sv;
-    }
 
     // Quick GPU compatibility check: skip encoders that definitely won't work on this GPU
     // This optimization prevents testing encoders on incompatible hardware (e.g., NVIDIA NVENC on AMD GPU)
