@@ -195,16 +195,22 @@ jobs:
         if: steps.inno-cache.outputs.cache-hit != 'true'
         shell: pwsh
         run: |
-          # Download and install Inno Setup 6 (silent install)
-          $url = "https://jrsoftware.org/download.php/is.exe"
-          $installer = "$env:TEMP\innosetup.exe"
-          Invoke-WebRequest -Uri $url -OutFile $installer
-          Start-Process -FilePath $installer -ArgumentList '/VERYSILENT /SUPPRESSMSGBOXES /NORESTART /SP-' -Wait
+          # Use the GitHub-hosted Windows runner's Chocolatey package manager.
+          choco install innosetup --yes --no-progress
+          if ($LASTEXITCODE -ne 0) {
+            throw "Chocolatey failed to install Inno Setup (exit code $LASTEXITCODE)"
+          }
 
-      - name: Add Inno Setup to PATH
+      - name: Verify Inno Setup and add to PATH
         shell: pwsh
         run: |
-          echo "C:\Program Files (x86)\Inno Setup 6" >> $env:GITHUB_PATH
+          $innoDir = "${env:ProgramFiles(x86)}\Inno Setup 6"
+          $compiler = Join-Path $innoDir "ISCC.exe"
+          if (-not (Test-Path -LiteralPath $compiler -PathType Leaf)) {
+            throw "Inno Setup compiler missing: $compiler"
+          }
+          $innoDir | Out-File -FilePath $env:GITHUB_PATH -Append -Encoding utf8
+          Write-Host "Inno Setup compiler verified: $compiler"
 
       - name: Package Windows
         shell: msys2 {0}
