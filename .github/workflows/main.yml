@@ -14,6 +14,7 @@ on:
   push:
     branches:
       - master
+      - original-881-old-gui
   workflow_dispatch:
 
 concurrency:
@@ -156,7 +157,7 @@ jobs:
         shell: msys2 {0}
         env:
           BRANCH: ${{ github.head_ref || github.ref_name }}
-          BUILD_VERSION: ${{ needs.setup_release.outputs.release_tag }}.杂鱼
+          BUILD_VERSION: ${{ needs.setup_release.outputs.release_tag }}.Ã¦Ââ€šÃ©Â±Â¼
           COMMIT: ${{ needs.setup_release.outputs.release_commit }}
           GITHUB_TOKEN: ${{ secrets.DRIVER_DOWNLOAD_TOKEN }}
           # Fork PRs cannot access org-scoped secrets, so private-repo driver
@@ -265,7 +266,7 @@ jobs:
             NEWTAG="v${YEAR}.${DATE_PADDED}"
           fi
 
-          # 重命名安装包和便携版
+          # Ã©â€¡ÂÃ¥â€˜Â½Ã¥ÂÂÃ¥Â®â€°Ã¨Â£â€¦Ã¥Å’â€¦Ã¥â€™Å’Ã¤Â¾Â¿Ã¦ÂÂºÃ§â€°Ë†
           mv artifacts/sunshine-windows-installer.exe "artifacts/Sunshine.${NEWTAG}.WindowsInstaller.exe"
           mv artifacts/sunshine-windows-portable.zip "artifacts/Sunshine.${NEWTAG}.WindowsPortable.zip"
 
@@ -287,7 +288,7 @@ jobs:
           allowUpdates: true
           body: ${{ needs.setup_release.outputs.release_body }}
           generateReleaseNotes: ${{ needs.setup_release.outputs.release_generate_release_notes }}
-          name: ${{ needs.setup_release.outputs.release_tag }}.杂鱼
+          name: ${{ needs.setup_release.outputs.release_tag }}.Ã¦Ââ€šÃ©Â±Â¼
           prerelease: true
-          tag: ${{ needs.setup_release.outputs.release_tag }}.杂鱼
+          tag: ${{ needs.setup_release.outputs.release_tag }}.Ã¦Ââ€šÃ©Â±Â¼
           token: ${{ secrets.GH_BOT_TOKEN }}
