@@ -361,6 +361,16 @@ namespace nvhttp {
 #if defined SUNSHINE_TRAY && SUNSHINE_TRAY >= 1
               system_tray::update_tray_require_pin(last_pair_name);
 #endif
+              const auto pairing_id_bytes = crypto::rand(16);
+              if (pairing_id_bytes.size() != 16) {
+                tree.put("root.<xmlattr>.status_code", 500);
+                tree.put("root.<xmlattr>.status_message", "Unable to generate pairing approval ID");
+                tree.put("root.paired", 0);
+                remove_session(ptr->second);
+                return;
+              }
+              ptr->second.async_insert_pin.pairing_id = util::hex_vec(pairing_id_bytes);
+              ptr->second.async_insert_pin.address = remote_addr.to_string();
               pending_pin_unique_id = ptr->second.client.uniqueID;
               ptr->second.async_insert_pin.response = std::move(response);
 
@@ -748,7 +758,7 @@ namespace nvhttp {
   }
 
   bool
-  pin(std::string pin, std::string name) {
+  pin(std::string pin, std::string name, std::string pairing_id) {
     pt::ptree tree;
     std::lock_guard<std::mutex> map_lock(map_id_sess_mutex);
     if (map_id_sess.empty()) {
@@ -757,6 +767,11 @@ namespace nvhttp {
     auto sess_it = map_id_sess.find(pending_pin_unique_id);
     if (sess_it == std::end(map_id_sess)) {
       BOOST_LOG(warning) << "Cannot apply PIN because the pending pairing session is no longer available";
+      return false;
+    }
+
+    if (!pairing_id.empty() && sess_it->second.async_insert_pin.pairing_id != pairing_id) {
+      BOOST_LOG(warning) << "Rejected PIN submission for an unknown pairing approval ID";
       return false;
     }
 
@@ -798,6 +813,22 @@ namespace nvhttp {
     pending_pin_unique_id.clear();
     tray_state::clear_pairing_required();
     return true;
+  }
+
+  nlohmann::json
+  get_pending_pairings() {
+    nlohmann::json pairings = nlohmann::json::array();
+    std::lock_guard<std::mutex> map_lock(map_id_sess_mutex);
+    if (pending_pin_unique_id.empty()) return pairings;
+    const auto it = map_id_sess.find(pending_pin_unique_id);
+    if (it == map_id_sess.end() || it->second.async_insert_pin.pairing_id.empty()) return pairings;
+    const auto &sess = it->second;
+    pairings.push_back({
+      { "id", sess.async_insert_pin.pairing_id },
+      { "name", last_pair_name },
+      { "address", sess.async_insert_pin.address }
+    });
+    return pairings;
   }
 
   nlohmann::json

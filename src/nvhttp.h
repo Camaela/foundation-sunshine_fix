@@ -99,6 +99,8 @@ namespace nvhttp {
         std::shared_ptr<typename web::ServerBase<SunshineHTTPS>::Response>>
         response;
       std::string salt = {};
+      std::string pairing_id = {};
+      std::string address = {};
     } async_insert_pin;
 
     /**
@@ -174,7 +176,10 @@ namespace nvhttp {
    * @examples_end
    */
   bool
-  pin(std::string pin, std::string name);
+  pin(std::string pin, std::string name, std::string pairing_id = {});
+
+  /// Pending PIN requests for the authenticated Web API (no certificates or PINs).
+  nlohmann::json get_pending_pairings();
 
   /**
    * @brief Remove single client.

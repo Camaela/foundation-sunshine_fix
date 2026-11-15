@@ -149,6 +149,15 @@ namespace confighttp::clients {
     }
 
     void
+    getPendingPairings(resp_https_t response, req_https_t request) {
+      if (!authenticate(response, request)) return;
+      print_req(request);
+      send_response(response, nlohmann::json {
+        { "pairings", nvhttp::get_pending_pairings() }
+      });
+    }
+
+    void
     savePin(resp_https_t response, req_https_t request) {
       if (!check_content_type(response, request, "application/json")) return;
       if (!authenticate(response, request)) return;
@@ -184,7 +193,8 @@ namespace confighttp::clients {
           return;
         }
 
-        bool pin_result = nvhttp::pin(pin, name);
+        std::string pairing_id = inputTree.get<std::string>("pairing_id", "");
+        bool pin_result = nvhttp::pin(pin, name, pairing_id);
         outputTree.put("status", pin_result);
 
         try {
@@ -599,6 +609,7 @@ namespace confighttp::clients {
 
   void
   register_routes(https_server_t &server) {
+    server.resource["^/api/pin$"]["GET"] = getPendingPairings;
     server.resource["^/api/pin$"]["POST"] = savePin;
     server.resource["^/api/qr-pair$"]["POST"] = generateQrPairInfo;
     server.resource["^/api/qr-pair/cancel$"]["POST"] = cancelQrPair;
