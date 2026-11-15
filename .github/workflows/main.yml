@@ -15,6 +15,7 @@ on:
     branches:
       - master
       - latest-gpup-fix
+      - pixelbot-pairing-fix
   workflow_dispatch:
 
 concurrency:
